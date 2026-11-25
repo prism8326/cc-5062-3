@@ -1,0 +1,15 @@
+{
+  "name": "pigment-km-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "颜料混色绘画原型：显式色料质量 + 简化 Kubelka-Munk 光学模型",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "preview": "node tools/render-preview.mjs",
+    "start": "node tools/serve.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
+  }
+}

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>色料 KM 绘画原型 · Pigment KM Studio</title>
+    <link rel="stylesheet" href="./css/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div class="brand-text">
+          <strong>色料 KM 绘画原型</strong>
+          <span>显式色料质量 · Kubelka–Munk 简化光学 · 非屏幕平均混色</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="health-dot" class="health-dot" title="内核状态"></span>
+        <button id="btn-undo" class="btn">撤销上一步</button>
+        <button id="btn-dry" class="btn btn-primary">晾干成层</button>
+        <button id="btn-clear" class="btn">清空画布</button>
+        <span class="sep"></span>
+        <button id="btn-save" class="btn">保存色料状态</button>
+        <button id="btn-load" class="btn">读取状态</button>
+        <input type="file" id="file-load" hidden accept=".pigm,.json,application/json" />
+        <select id="export-scale" class="select" title="导出放大倍率（最近邻，颜色不变）">
+          <option value="1">PNG 1×</option>
+          <option value="2">PNG 2×</option>
+          <option value="4">PNG 4×</option>
+        </select>
+        <button id="btn-export" class="btn">导出图像</button>
+        <span class="sep"></span>
+        <button id="btn-help" class="btn btn-ghost">说明</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- 左：色料 / 调色皿 / 画笔 -->
+      <aside class="panel panel-left">
+        <section class="card">
+          <h2>色料库 <small id="pigment-set-note"></small></h2>
+          <div id="pigment-list" class="pigment-list"></div>
+        </section>
+
+        <section class="card">
+          <h2>调色皿（均质预混）</h2>
+          <div id="mixer-rows" class="mixer-rows"></div>
+          <canvas id="mixer-ramp" class="ramp-canvas" width="264" height="58"></canvas>
+          <div class="mixer-meta">
+            <span id="mixer-swatch" class="big-swatch"></span>
+            <div class="mixer-info">
+              <div id="mixer-hex" class="mono">—</div>
+              <div id="mixer-conc" class="muted"></div>
+            </div>
+          </div>
+          <div class="row-actions">
+            <button id="btn-dip" class="btn btn-primary grow">按配方蘸入画笔</button>
+            <button id="btn-mixer-clear" class="btn">清空份数</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>画笔（笔上质量分账）</h2>
+          <div class="brush-head">
+            <span id="brush-swatch" class="big-swatch"></span>
+            <div class="brush-stats">
+              <div id="brush-mass" class="mono">笔上色料 0</div>
+              <div id="brush-conc" class="muted">浓度 0%</div>
+              <div id="brush-dabs" class="muted"></div>
+            </div>
+          </div>
+          <div id="brush-bars" class="mass-bars"></div>
+
+          <label class="slider">
+            <span>笔径 <b id="val-radius">7</b> px</span>
+            <input id="sl-radius" type="range" min="2" max="26" step="1" value="7" />
+          </label>
+          <label class="slider">
+            <span>沉积量 <b id="val-flow">1.00</b></span>
+            <input id="sl-flow" type="range" min="0.08" max="2" step="0.02" value="1" />
+          </label>
+          <label class="slider">
+            <span>湿交换强度 <b id="val-exchange">0.55</b></span>
+            <input id="sl-exchange" type="range" min="0" max="1" step="0.05" value="0.55" />
+          </label>
+          <label class="slider">
+            <span>含水量（下次蘸取） <b id="val-water">1.8</b></span>
+            <input id="sl-water" type="range" min="0.4" max="4" step="0.1" value="1.8" />
+          </label>
+          <div class="row-actions">
+            <button id="btn-brush-clean" class="btn grow">清洗画笔</button>
+            <button id="btn-brush-water" class="btn">笔蘸清水</button>
+          </div>
+        </section>
+      </aside>
+
+      <!-- 中：绘画窗口 -->
+      <section class="center">
+        <div class="canvas-toolbar">
+          <div class="tool-group" id="tool-group">
+            <button class="tool-btn active" data-tool="brush">画笔</button>
+            <button class="tool-btn" data-tool="sampleA">取样到 A</button>
+            <button class="tool-btn" data-tool="sampleB">取样到 B</button>
+          </div>
+          <div class="zoom-group">
+            <button id="zoom-out" class="btn icon">−</button>
+            <span id="zoom-label" class="zoom-label">适应</span>
+            <button id="zoom-in" class="btn icon">＋</button>
+            <button id="zoom-fit" class="btn">适应</button>
+            <span class="hint">缩放仅最近邻放大，颜色求值与视图无关</span>
+          </div>
+        </div>
+
+        <div class="canvas-wrap" id="canvas-wrap">
+          <div class="canvas-frame" id="canvas-frame">
+            <canvas id="view" width="400" height="300"></canvas>
+          </div>
+        </div>
+
+        <div class="statusbar" id="statusbar">
+          <span id="status-pos">坐标 —</span>
+          <span id="status-pixel" class="mono">—</span>
+          <span id="status-layer">—</span>
+          <span class="grow"></span>
+          <span id="status-hint" class="hint">按住拖动绘制连续笔迹；点“晾干成层”后再画即形成光学罩染层</span>
+        </div>
+      </section>
+
+      <!-- 右：取样比较 / 测试台 / 像素 -->
+      <aside class="panel panel-right">
+        <div class="tabs">
+          <button class="tab active" data-tab="sample">取样比较</button>
+          <button class="tab" data-tab="bench">测试台</button>
+          <button class="tab" data-tab="pixels">画布像素</button>
+        </div>
+
+        <div class="tab-panes">
+          <div class="pane active" data-pane="sample">
+            <div class="sample-pair">
+              <div class="sample-col">
+                <div class="sample-head"><b>样本 A</b><button class="btn mini" data-arm="A">画布取 A</button></div>
+                <span id="sample-a-swatch" class="sample-swatch empty"></span>
+                <div id="sample-a-hex" class="mono">未取样</div>
+                <div id="sample-a-lab" class="muted"></div>
+              </div>
+              <div class="sample-col">
+                <div class="sample-head"><b>样本 B</b><button class="btn mini" data-arm="B">画布取 B</button></div>
+                <span id="sample-b-swatch" class="sample-swatch empty"></span>
+                <div id="sample-b-hex" class="mono">未取样</div>
+                <div id="sample-b-lab" class="muted"></div>
+              </div>
+            </div>
+            <div class="delta-box">
+              <div>ΔE76 = <b id="delta-e76">—</b></div>
+              <div>CIEDE2000 = <b id="delta-e00">—</b></div>
+              <div id="delta-note" class="muted"></div>
+            </div>
+            <canvas id="spectrum-chart" width="300" height="120" class="chart"></canvas>
+            <div id="sample-detail" class="sample-detail muted">
+              用“画布取 A/B”按钮后点击画布像素，可查看该像素的湿膜/干层与色料质量组成。
+            </div>
+          </div>
+
+          <div class="pane" data-pane="bench">
+            <div class="bench-controls">
+              <label>单色测试
+                <select id="bench-pigment"></select>
+              </label>
+              <div class="bench-block">
+                <div class="bench-title">① 单色厚度梯度（上：暖白底，下：黑底）</div>
+                <canvas id="bench-thickness" width="300" height="92"></canvas>
+              </div>
+
+              <label>双颜料比例
+                <span class="pair-select">
+                  <select id="bench-a"></select> ×
+                  <select id="bench-b"></select>
+                </span>
+              </label>
+              <div class="bench-block">
+                <div class="bench-title">② 均质预混比例 0→100%</div>
+                <canvas id="bench-ratio" width="300" height="40"></canvas>
+              </div>
+              <div class="bench-block">
+                <div class="bench-title">混合顺序政策（薄层）</div>
+                <div id="bench-order" class="order-row"></div>
+              </div>
+
+              <div class="bench-block">
+                <div class="bench-title">③ 不同底色 × 浓度（每格现场求值）</div>
+                <div id="bench-substrates"></div>
+              </div>
+
+              <button id="btn-run-checks" class="btn btn-primary">运行全部数值/守恒检查</button>
+              <div id="checks-summary" class="checks-summary"></div>
+              <ul id="checks-list" class="checks-list"></ul>
+            </div>
+          </div>
+
+          <div class="pane" data-pane="pixels">
+            <div class="bench-title">指针附近像素放大（最近邻，无颜色重算）</div>
+            <canvas id="loupe" width="300" height="220" class="loupe"></canvas>
+            <div id="loupe-info" class="mono muted">移动指针查看画布像素</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <div id="toast-wrap" class="toast-wrap"></div>
+
+    <div id="help-modal" class="modal-backdrop" hidden>
+      <div class="modal">
+        <h2>这是什么 / 怎么启动</h2>
+        <div id="help-body" class="help-body"></div>
+        <div class="row-actions right">
+          <button id="btn-help-close" class="btn btn-primary">开始画</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>
