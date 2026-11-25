@@ -42,6 +42,47 @@ export function cmfZ(wl) {
 
 const CMF = WAVELENGTHS.map((w) => [cmfX(w), cmfY(w), cmfZ(w)]);
 
+// 相对照明光谱。E 是原型默认；D65 使用 10 nm 近似表，A 由 2856 K Planck 式生成。
+// 它们只参与光谱积分，后面仍走同一个独立显示变换，不允许直接混合 RGB。
+const D65_SPD = [
+  82.75, 91.49, 93.43, 86.68, 104.87, 117.01, 117.81, 114.86, 115.92, 108.81,
+  109.35, 107.8, 104.79, 107.69, 104.41, 104.05, 100.0, 96.33, 95.79, 88.69,
+  90.01, 89.6, 87.7, 83.29, 83.7, 80.03, 80.22, 82.28, 78.28, 69.72, 71.61,
+];
+
+function planckRelative(wlNm, temperature = 2856) {
+  const h = 6.62607015e-34;
+  const c = 299792458;
+  const k = 1.380649e-23;
+  const wl = wlNm * 1e-9;
+  const exponent = (h * c) / (wl * k * temperature);
+  return (2 * h * c * c) / (wl ** 5 * Math.expm1(exponent));
+}
+
+const A_RAW = WAVELENGTHS.map((w) => planckRelative(w, 2856));
+const A_NORM = A_RAW[WAVELENGTHS.indexOf(560)] || A_RAW[0];
+
+export const ILLUMINANTS = {
+  E: { id: 'E', name: '等能 E（原型默认）', spd: WAVELENGTHS.map(() => 1), exposure: 1 },
+  D65: { id: 'D65', name: '近似 D65 明亮日光', spd: D65_SPD, exposure: 1 },
+  A: { id: 'A', name: 'CIE A / 2856K 暖灯', spd: A_RAW.map((x) => x / A_NORM), exposure: 1 },
+  brightD65: { id: 'brightD65', name: '明亮照明（近似 D65）', spd: D65_SPD, exposure: 1 },
+  dimWarmA: {
+    id: 'dimWarmA',
+    name: '昏暗暖光（A，曝光 45%）',
+    spd: A_RAW.map((x) => x / A_NORM),
+    exposure: 0.45,
+  },
+};
+
+function resolveIlluminant(options = {}) {
+  const key = typeof options === 'string' ? options : options.illuminant || 'E';
+  const ill = typeof key === 'object' ? key : ILLUMINANTS[key];
+  if (!ill) throw new Error(`未知光源：${key}`);
+  const exposure = typeof options.exposure === 'number' ? options.exposure : ill.exposure ?? 1;
+  return { ill, exposure };
+}
+
 // 原型采用等能光源 E（S(lambda)=1），再用 Bradford 色适应映射到 sRGB 的 D65 白点。
 // 这是明确声明的简化选择，不冒充 D65 实测配色。
 export const ILLUMINANT_ID = 'equal-energy-E + Bradford->D65';
@@ -49,18 +90,23 @@ export const ILLUMINANT_ID = 'equal-energy-E + Bradford->D65';
 const sumY = CMF.reduce((s, c) => s + c[1], 0) * WL_STEP;
 const NORM = 1 / sumY; // 使理想反射体 Y = 1
 
-export function spectrumToXYZ(R) {
+export function spectrumToXYZ(R, illuminant = ILLUMINANTS.E) {
+  const ill = typeof illuminant === 'string' ? ILLUMINANTS[illuminant] : illuminant;
+  const spd = ill?.spd || ILLUMINANTS.E.spd;
   let X = 0,
     Y = 0,
     Z = 0;
+  let whiteY = 0;
   for (let i = 0; i < WAVELENGTHS.length; i++) {
     const r = R[i];
+    const s = spd[i] ?? 1;
     const [x, y, z] = CMF[i];
-    X += r * x;
-    Y += r * y;
-    Z += r * z;
+    X += r * s * x;
+    Y += r * s * y;
+    Z += r * s * z;
+    whiteY += s * y;
   }
-  const k = NORM * WL_STEP;
+  const k = WL_STEP / whiteY; // 使该光源下理想反射体 Y = 1
   return { X: X * k, Y: Y * k, Z: Z * k };
 }
 
@@ -89,8 +135,8 @@ function matVec(M, v) {
   ];
 }
 
-function bradfordAdaptXYZ(X, Y, Z) {
-  const src = matVec(M_BFD, [WHITE_E.X, WHITE_E.Y, WHITE_E.Z]);
+function bradfordAdaptXYZ(X, Y, Z, sourceWhite = WHITE_E) {
+  const src = matVec(M_BFD, [sourceWhite.X, sourceWhite.Y, sourceWhite.Z]);
   const dst = matVec(M_BFD, [D65_WHITE.X, D65_WHITE.Y, D65_WHITE.Z]);
   const g = [dst[0] / src[0], dst[1] / src[1], dst[2] / src[2]];
   const cones = matVec(M_BFD, [X, Y, Z]);
@@ -111,10 +157,14 @@ function gammaEncode(c) {
   return 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
 }
 
-export function spectrumToDisplay(R) {
-  const xyzE = spectrumToXYZ(R);
-  const xyz = bradfordAdaptXYZ(xyzE.X, xyzE.Y, xyzE.Z);
-  const lin = matVec(XYZ_TO_LINSRGB, [xyz.X, xyz.Y, xyz.Z]);
+export function spectrumToDisplay(R, options = {}) {
+  const { ill, exposure } = resolveIlluminant(options);
+  const sourceWhite = spectrumToXYZ(WAVELENGTHS.map(() => 1), ill);
+  const xyzIll = spectrumToXYZ(R, ill);
+  const xyz = bradfordAdaptXYZ(xyzIll.X, xyzIll.Y, xyzIll.Z, sourceWhite);
+  const surfaceLab = xyzToLab(xyz.X, xyz.Y, xyz.Z);
+  const exposedXYZ = { X: xyz.X * exposure, Y: xyz.Y * exposure, Z: xyz.Z * exposure };
+  const lin = matVec(XYZ_TO_LINSRGB, [exposedXYZ.X, exposedXYZ.Y, exposedXYZ.Z]);
   const encoded = lin.map(gammaEncode);
   const raw = encoded.map((c) => Math.round(clamp01(c) * 255));
   const clipped = lin.some((c) => c < -1e-5 || c > 1 + 1e-5);
@@ -129,7 +179,11 @@ export function spectrumToDisplay(R) {
         .map((v) => v.toString(16).padStart(2, '0'))
         .join(''),
     xyz,
-    lab: xyzToLab(xyz.X, xyz.Y, xyz.Z),
+    apparentXYZ: exposedXYZ,
+    lab: xyzToLab(exposedXYZ.X, exposedXYZ.Y, exposedXYZ.Z),
+    surfaceLab,
+    illuminant: ill.id,
+    exposure,
     linear: lin,
     clipped,
   };

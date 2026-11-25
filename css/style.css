@@ -346,3 +346,87 @@ button { font: inherit; }
   .layout { grid-template-columns: 292px minmax(0,1fr) 320px; }
   .brand-text span { display: none; }
 }
+
+/* ---------- 运行状态与绘画接点自检 ---------- */
+.runtime-state {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: #f3f5f9;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.runtime-state.ok { background: #eaf8f0; border-color: #9fddba; color: #137a42; }
+.runtime-state.bad { background: #ffeded; border-color: #f0b0b0; color: #a92323; }
+.runtime-state.running { background: #eaf1ff; border-color: #aec5f7; color: #244db0; }
+.tool-btn-check { color: var(--primary); }
+.integration-panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 12px;
+  max-height: 86px;
+  overflow: auto;
+}
+.integration-panel.ok { border-color: #9fddba; background: #f3fbf6; }
+.integration-panel.bad { border-color: #f0b0b0; background: #fff4f4; }
+.integration-panel.running { border-color: #aec5f7; background: #f2f6ff; }
+.integration-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.anomaly-list { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.anomaly-item { color: #a92323; font-family: var(--mono); font-size: 11px; }
+.anomaly-layer { position: absolute; inset: 0; pointer-events: none; z-index: 8; }
+.anomaly-marker {
+  position: absolute;
+  border: 2px solid #ff2d2d;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.9), 0 0 10px rgba(255,45,45,.65);
+  border-radius: 2px;
+}
+.probe-marker {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid #12b76a;
+  background: rgba(18,183,106,.18);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* ---------- 封存试混台 ---------- */
+.lab-help { margin: 0 0 8px; line-height: 1.55; }
+.lab-actions { margin-top: 6px; }
+.lab-compare { margin: 8px 0 2px; overflow-x: auto; }
+.lab-compare table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 8px; font-size: 10.5px; }
+.lab-compare th, .lab-compare td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.lab-compare th { background: #f3f5f9; color: var(--ink-2); font-weight: 650; }
+.lab-compare tr:last-child td { border-bottom: 0; }
+.lab-compare .yes { color: #a92323; font-family: var(--mono); font-weight: 700; }
+.lab-compare .no { color: #137a42; font-family: var(--mono); font-weight: 700; }
+.lab-mini-swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border: 1px solid rgba(0,0,0,.18); border-radius: 2px; vertical-align: -1px; }
+.lab-dry-line { grid-column: 1 / -1; padding-top: 3px; border-top: 1px dashed var(--line); font-size: 10.5px; color: var(--muted); }
+.lab-dry-line b { font-family: var(--mono); font-weight: 650; }
+.lab-cards { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.lab-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px;
+}
+.lab-card.bad { border-color: #f0b0b0; }
+.lab-card.ok { border-color: #9fddba; }
+.lab-card-head { display: flex; justify-content: space-between; gap: 8px; align-items: start; }
+.lab-card-title b { font-size: 12.5px; display: block; }
+.lab-card-title span { font-size: 10.5px; color: var(--muted); }
+.lab-badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.lab-badge { font-size: 10px; border-radius: 999px; padding: 2px 7px; background: #eef1f7; color: var(--ink-2); }
+.lab-badge.sealed { background: #fff2d8; color: #9a5b00; }
+.lab-badge.lifted { background: #ffeded; color: #a92323; }
+.lab-swatches { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: 8px 0; }
+.lab-swatch { height: 42px; border-radius: 7px; border: 1px solid rgba(0,0,0,.12); display: flex; align-items: end; padding: 4px; }
+.lab-swatch span { background: rgba(255,255,255,.82); border-radius: 4px; padding: 1px 4px; font-family: var(--mono); font-size: 9.5px; color: #1f2430; }
+.lab-mass { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 11px; color: var(--ink-2); }
+.lab-mass b { font-family: var(--mono); color: var(--ink); }
+.lab-model-summary { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink-2); line-height: 1.45; }
+.lab-model-summary code { font-family: var(--mono); color: var(--ink); }

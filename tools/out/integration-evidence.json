@@ -1,0 +1,80 @@
+{
+  "schema": "browser-integration-evidence-v1",
+  "generatedAt": "2026-11-25T16:32:38.433Z",
+  "browser": "playwright-chromium",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "runtimeState": "运行正常 · 接点已核对 ΔE 51.5",
+  "integrationPanelClass": "integration-panel ok",
+  "healthDotBad": false,
+  "consoleWarnings": [],
+  "integration": {
+    "at": "2026-11-25T16:32:38.403Z",
+    "maxChannelDiff": 0,
+    "colorChangeDE": 51.497747532048706,
+    "dryChangeDE": 3.685925581332927,
+    "mass": 13454.81301611885,
+    "anomalies": [],
+    "actualPixel": [
+      {
+        "x": 86,
+        "y": 99,
+        "idx": 39686,
+        "label": "黄青均质混合",
+        "rgb": [
+          164,
+          99,
+          175
+        ]
+      },
+      {
+        "x": 176,
+        "y": 106,
+        "idx": 42576,
+        "label": "品红叠涂区",
+        "rgb": [
+          248,
+          102,
+          251
+        ]
+      },
+      {
+        "x": 42,
+        "y": 99,
+        "idx": 39642,
+        "label": "混合色块左区",
+        "rgb": [
+          73,
+          206,
+          131
+        ]
+      }
+    ]
+  },
+  "metamer": {
+    "brightD65DeltaE00": 0.29070597672410176,
+    "warmADeltaE00": 3.3896968703205723,
+    "dimWarmADeltaE00": 2.8329130941878966
+  },
+  "sealWater": [
+    {
+      "recipeId": "ochre-ground",
+      "soluble": true,
+      "beforeSealRemovedMass": 1.584,
+      "beforeSealRemainingMass": 0.6160000000000001,
+      "afterSealRemovedMass": 0,
+      "afterSealRemainingMass": 2.2
+    },
+    {
+      "recipeId": "lemon-red-ground",
+      "soluble": false,
+      "beforeSealRemovedMass": 0,
+      "beforeSealRemainingMass": 2.2,
+      "afterSealRemovedMass": 0,
+      "afterSealRemainingMass": 2.2
+    }
+  ],
+  "repeatedMixMaxRelativeDrift": 1.5980482930210581e-15
+}

@@ -29,8 +29,10 @@ function assert(cond, msg) {
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
 const consoleErrors = [];
+const consoleWarnings = [];
 page.on('console', (m) => {
   if (m.type() === 'error') consoleErrors.push(m.text());
+  if (m.type() === 'warning') consoleWarnings.push(m.text());
 });
 page.on('pageerror', (e) => consoleErrors.push('pageerror: ' + e.message));
 page.on('dialog', (d) => d.accept());
@@ -154,6 +156,94 @@ try {
     return n;
   });
   assert(benchPainted > 1000, '测试台厚度梯度由内核绘制');
+
+  // 封存试混台：未封存水洗 -> 封存 -> 阻挡
+  await page.click('.tab[data-tab="lab"]');
+  await page.waitForSelector('#lab-cards .lab-card', { state: 'attached' });
+  await page.waitForSelector('#lab-seal-compare table', { state: 'attached' });
+  const compareText = await page.textContent('#lab-seal-compare');
+  assert(compareText.includes('1.584') && compareText.includes('0.000'), '封存前/后对照表由复算数据渲染');
+  await page.click('#btn-lab-water');
+  const openMass = await page.evaluate(() => window.__pigmentStudio.getLabSwatches()[0].remainingMass());
+  assert(Math.abs(openMass - 0.616) < 0.01, `未封存可溶底层被清水回取（剩余 ${openMass.toFixed(3)}）`);
+  await page.click('#btn-lab-reset');
+  await page.click('#btn-lab-seal');
+  await page.click('#btn-lab-water');
+  const sealedMass = await page.evaluate(() => window.__pigmentStudio.getLabSwatches()[0].remainingMass());
+  assert(Math.abs(sealedMass - 2.2) < 1e-6, `封存后清水不能带走底层（剩余 ${sealedMass.toFixed(3)}）`);
+  const metamerDE = await page.evaluate(() => {
+    const r = window.__pigmentStudio.buildExperimentReport();
+    return { d65: r.metamer.brightD65DeltaE00, warm: r.metamer.warmADeltaE00 };
+  });
+  assert(metamerDE.d65 < 1.5 && metamerDE.warm > 2, `同色异颜料指标成立（D65=${metamerDE.d65.toFixed(2)}, warm=${metamerDE.warm.toFixed(2)}）`);
+
+  const [labJson] = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-lab-export-json'),
+  ]);
+  const labJsonPath = path.join(OUT, 'lab-samples.json');
+  await labJson.saveAs(labJsonPath);
+  const labJsonSize = fs.statSync(labJsonPath).size;
+  assert(labJsonSize > 5000, `封存试混 JSON 已导出（${(labJsonSize / 1024).toFixed(1)} KB）`);
+
+  const [labPng] = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-lab-export-png'),
+  ]);
+  const labPngPath = path.join(OUT, 'lab-samples.png');
+  await labPng.saveAs(labPngPath);
+  assert(fs.statSync(labPngPath).size > 8000, '封存试混 PNG 已导出');
+
+  // 绘画窗口真实接点：混色、晾干、叠画并读取画布像素
+  await page.click('#btn-integration-check');
+  await page.waitForSelector('#integration-panel.ok, #integration-panel.bad', { timeout: 5000 });
+  const integration = await page.evaluate(() => window.__pigmentLastIntegration);
+  assert(integration && integration.anomalies.length === 0, `绘画接点自检无异常（ΔE=${integration?.colorChangeDE?.toFixed?.(2)}, maxPixelDiff=${integration?.maxChannelDiff}）`);
+  assert(integration && integration.maxChannelDiff === 0, `画布像素与内核缓冲逐通道一致（max=${integration?.maxChannelDiff}）`);
+  const runtimeState = await page.textContent('#runtime-state');
+  const integrationPanelClass = await page.getAttribute('#integration-panel', 'class');
+  const healthDotBad = await page.evaluate(() => document.querySelector('#health-dot')?.classList.contains('bad') ?? null);
+  const browserEvidence = await page.evaluate(() => {
+    const report = window.__pigmentStudio.buildExperimentReport();
+    return {
+      metamer: {
+        brightD65DeltaE00: report.metamer.brightD65DeltaE00,
+        warmADeltaE00: report.metamer.warmADeltaE00,
+        dimWarmADeltaE00: report.metamer.dimWarmADeltaE00,
+      },
+      sealWater: report.sealWater.map((x) => ({
+        recipeId: x.recipeId,
+        soluble: x.soluble,
+        beforeSealRemovedMass: x.waterBeforeSeal.result.removedMass,
+        beforeSealRemainingMass: x.waterBeforeSeal.wet.remainingMass,
+        afterSealRemovedMass: x.waterAfterSeal.result.removedMass,
+        afterSealRemainingMass: x.waterAfterSeal.wet.remainingMass,
+      })),
+      repeatedMixMaxRelativeDrift: report.repeatedMix.spectral.maxRelativeDrift,
+    };
+  });
+  const evidencePath = path.join(OUT, 'integration-evidence.json');
+  fs.writeFileSync(
+    evidencePath,
+    JSON.stringify(
+      {
+        schema: 'browser-integration-evidence-v1',
+        generatedAt: new Date().toISOString(),
+        browser: 'playwright-chromium',
+        viewport: { width: 1600, height: 1000 },
+        runtimeState: runtimeState.trim(),
+        integrationPanelClass,
+        healthDotBad,
+        consoleWarnings,
+        integration,
+        ...browserEvidence,
+      },
+      null,
+      2
+    )
+  );
+  assert(fs.statSync(evidencePath).size > 1000, '浏览器接点与色差证据 JSON 已写出');
+  await page.screenshot({ path: path.join(OUT, 'ui-07-integration.png') });
 
   // 像素页
   await page.click('.tab[data-tab="pixels"]');

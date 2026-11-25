@@ -73,6 +73,7 @@ export function drawSpectrumChart(canvas, series) {
     if (!s?.R) continue;
     ctx.strokeStyle = s.color || '#2f5fd0';
     ctx.lineWidth = 2;
+    ctx.setLineDash(s.dash || []);
     ctx.beginPath();
     s.R.forEach((r, i) => {
       const x = padL + (i / (s.R.length - 1)) * pw;
@@ -81,6 +82,7 @@ export function drawSpectrumChart(canvas, series) {
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
+    ctx.setLineDash([]);
   }
   ctx.strokeStyle = '#c8cedb';
   ctx.strokeRect(padL + 0.5, padT + 0.5, pw, ph);

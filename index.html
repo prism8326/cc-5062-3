@@ -102,7 +102,9 @@
             <button class="tool-btn active" data-tool="brush">画笔</button>
             <button class="tool-btn" data-tool="sampleA">取样到 A</button>
             <button class="tool-btn" data-tool="sampleB">取样到 B</button>
+            <button id="btn-integration-check" class="tool-btn tool-btn-check" title="混合颜料、晾干、叠画色块，并逐像素对照画布缓冲">绘画接点自检</button>
           </div>
+          <span id="runtime-state" class="runtime-state idle">内核已载入 · 接点待核对</span>
           <div class="zoom-group">
             <button id="zoom-out" class="btn icon">−</button>
             <span id="zoom-label" class="zoom-label">适应</span>
@@ -112,9 +114,18 @@
           </div>
         </div>
 
+        <div id="integration-panel" class="integration-panel idle" aria-live="polite">
+          <div class="integration-head">
+            <b id="integration-title">绘画窗口接点：等待执行</b>
+            <span id="integration-summary" class="mono">将自动混色、叠画并核对颜色变化与画布像素</span>
+          </div>
+          <div id="integration-anomalies" class="anomaly-list"></div>
+        </div>
+
         <div class="canvas-wrap" id="canvas-wrap">
           <div class="canvas-frame" id="canvas-frame">
             <canvas id="view" width="400" height="300"></canvas>
+            <div id="anomaly-layer" class="anomaly-layer"></div>
           </div>
         </div>
 
@@ -132,6 +143,7 @@
         <div class="tabs">
           <button class="tab active" data-tab="sample">取样比较</button>
           <button class="tab" data-tab="bench">测试台</button>
+          <button class="tab" data-tab="lab">封存试混</button>
           <button class="tab" data-tab="pixels">画布像素</button>
         </div>
 
@@ -195,6 +207,36 @@
               <button id="btn-run-checks" class="btn btn-primary">运行全部数值/守恒检查</button>
               <div id="checks-summary" class="checks-summary"></div>
               <ul id="checks-list" class="checks-list"></ul>
+            </div>
+          </div>
+
+          <div class="pane" data-pane="lab">
+            <div class="bench-controls lab-controls">
+              <div class="bench-title">试混台 ④ 同色异颜料底层 · 可封存湿色样 · 清水回取</div>
+              <p class="muted lab-help">
+                两片底层在明亮 D65 下由光谱模型调到接近同色；切换到昏暗暖光会分离。
+                所有剩余颜料量都来自质量账本，屏幕 Hex 只是末端显示。
+              </p>
+              <div class="row-actions lab-actions">
+                <button id="btn-lab-water" class="btn btn-primary grow">滴同一滴清水</button>
+                <button id="btn-lab-seal" class="btn grow">封存全部湿样</button>
+              </div>
+              <div class="row-actions lab-actions">
+                <button id="btn-lab-dry" class="btn grow">干燥复算</button>
+                <button id="btn-lab-reset" class="btn grow">重置湿样</button>
+              </div>
+              <div class="row-actions lab-actions">
+                <button id="btn-lab-export-json" class="btn grow">导出明暗色样＋剩余颜料 JSON</button>
+                <button id="btn-lab-export-png" class="btn">导出 PNG</button>
+              </div>
+              <div id="lab-status" class="checks-summary">试混片已就绪：可先滴水，或先封存再滴水</div>
+              <div id="lab-seal-compare" class="lab-compare"></div>
+              <div id="lab-cards" class="lab-cards"></div>
+              <div class="bench-block">
+                <div class="bench-title">光谱反射响应：实线＝31 波段 KM，虚线＝受限 7 箱参数模型</div>
+                <canvas id="lab-reflectance" width="300" height="132" class="chart"></canvas>
+              </div>
+              <div id="lab-model-summary" class="lab-model-summary"></div>
             </div>
           </div>
 

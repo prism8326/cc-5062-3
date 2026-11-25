@@ -7,7 +7,7 @@ import {
   PIGMENT_SET_NOTE,
   SUBSTRATES,
 } from './pigments.js';
-import { PAPER, mixtureColor, evaluatePixelSpectrum } from './render.js';
+import { PAPER, mixtureColor, evaluatePixelSpectrum, evaluatePixelColor } from './render.js';
 import {
   spectrumToDisplay,
   deltaE76,
@@ -22,6 +22,12 @@ import {
   substrateGrid,
   orderComparison,
 } from './checks.js';
+import {
+  METAMER_RECIPES,
+  SealableSwatch,
+  modelDifference,
+  buildExperimentReport,
+} from './pigment-lab.js';
 import { paintTwoRowRamp, paintHorizontalStrip, drawSpectrumChart, downloadBlob, nowStamp } from './ui/widgets.js';
 import { gzipString, gunzipToText } from './codec.js';
 import { health } from './health.js';
@@ -45,6 +51,13 @@ const history = [];
 const HISTORY_CAP = 16;
 
 const stroke = { active: false, x: 0, y: 0, before: null };
+
+let labSwatches = createLabSwatches();
+let lastIntegration = null;
+
+function createLabSwatches() {
+  return METAMER_RECIPES.map((recipe) => new SealableSwatch(recipe, { wet: true }));
+}
 
 // ---------- 小工具 ----------
 function toast(msg, kind = '', ms = 3200) {
@@ -72,7 +85,7 @@ function attachBuffer() {
   const view = $('#view');
   view.width = doc.W;
   view.height = doc.H;
-  const ctx = view.getContext('2d');
+  const ctx = view.getContext('2d', { willReadFrequently: true });
   imageData = ctx.createImageData(doc.W, doc.H);
   // 初始纸白不透明
   for (let i = 0; i < doc.N; i++) {
@@ -592,6 +605,381 @@ function renderChecks() {
     .join('');
 }
 
+// ---------- 可封存试混台 ----------
+const LAB_DROP = Object.freeze({ volume: 0.85, lift: 0.72 });
+
+function labSetStatus(text, kind = '') {
+  const el = $('#lab-status');
+  if (!el) return;
+  el.className = `checks-summary ${kind}`;
+  el.textContent = text;
+}
+
+function renderLabChart() {
+  const canvas = $('#lab-reflectance');
+  if (!canvas) return;
+  const series = [];
+  labSwatches.forEach((swatch, i) => {
+    const diff = modelDifference(Array.from(swatch.remainingMasses()), swatch.h);
+    const hue = i === 0 ? '#b7791f' : '#d23b8a';
+    series.push({ R: diff.R_spectral, color: hue, label: `${i + 1} 光谱` });
+    series.push({ R: diff.R_constrained, color: hue, label: `${i + 1} 受限`, dash: [5, 4] });
+  });
+  drawSpectrumChart(canvas, series);
+}
+
+function renderLab() {
+  const root = $('#lab-cards');
+  if (!root) return;
+  const report = buildExperimentReport();
+  const compare = $('#lab-seal-compare');
+  if (compare) {
+    compare.innerHTML = `<table>
+      <thead><tr><th>同一滴 0.72 回取强度清水</th><th>封存前带走</th><th>封存前剩余</th><th>封存前干色</th><th>先封存带走</th><th>封存后剩余</th><th>封存后干色</th></tr></thead>
+      <tbody>${report.sealWater
+        .map((x) => {
+          const beforeRemoved = x.waterBeforeSeal.result.removedMass;
+          const afterRemoved = x.waterAfterSeal.result.removedMass;
+          const beforeHex = x.waterBeforeSeal.dry.colors.spectral.brightD65.hex;
+          const afterHex = x.waterAfterSeal.dry.colors.spectral.brightD65.hex;
+          return `<tr>
+            <td>${x.name}${x.soluble ? '（可溶）' : '（耐水）'}</td>
+            <td class="${beforeRemoved > 1e-9 ? 'yes' : 'no'}">${beforeRemoved.toFixed(3)}</td>
+            <td>${x.waterBeforeSeal.wet.remainingMass.toFixed(3)}</td>
+            <td><span class="lab-mini-swatch" style="background:${beforeHex}"></span>${beforeHex}</td>
+            <td class="${afterRemoved > 1e-9 ? 'yes' : 'no'}">${afterRemoved.toFixed(3)}</td>
+            <td>${x.waterAfterSeal.wet.remainingMass.toFixed(3)}</td>
+            <td><span class="lab-mini-swatch" style="background:${afterHex}"></span>${afterHex}</td>
+          </tr>`;
+        })
+        .join('')}</tbody>
+    </table>`;
+  }
+  root.innerHTML = labSwatches
+    .map((swatch, i) => {
+      const snap = swatch.snapshot();
+      const c = snap.colors.spectral;
+      const constrained = snap.colors.constrained;
+      const dryModels = modelDifference(snap.remaining, swatch.h);
+      const lastLift = [...snap.events].reverse().find((e) => e.type === 'water-lift');
+      const badges = [
+        `<span class="lab-badge">${snap.soluble ? '可溶底层' : '耐水底层'}</span>`,
+        `<span class="lab-badge ${snap.sealed ? 'sealed' : ''}">${snap.sealed ? '已封存隔离' : '未封存'}</span>`,
+        `<span class="lab-badge">${snap.wet ? '湿态' : '干燥'}</span>`,
+        lastLift ? `<span class="lab-badge lifted">已回取 ${lastLift.removedMass.toFixed(2)}</span>` : '',
+      ].join('');
+      return `<article class="lab-card ${lastLift ? 'bad' : snap.sealed ? 'ok' : ''}">
+        <div class="lab-card-head">
+          <div class="lab-card-title"><b>试混片 ${i + 1} · ${snap.name}</b><span>${snap.recipeId}</span></div>
+          <div class="lab-badges">${badges}</div>
+        </div>
+        <div class="lab-swatches">
+          <div class="lab-swatch" style="background:${c.brightD65.hex}"><span>明 D65 ${c.brightD65.hex}</span></div>
+          <div class="lab-swatch" style="background:${c.dimWarmA.hex}"><span>暗暖光 ${c.dimWarmA.hex}</span></div>
+        </div>
+        <div class="lab-mass">
+          <span>试片剩余色料</span><b>${snap.remainingMass.toFixed(4)}</b>
+          <span>水滴/流出物带走</span><b>${snap.effluentMass.toFixed(4)}</b>
+          <span>物质总量（试片＋流出）</span><b>${snap.totalPigmentMass.toFixed(4)}</b>
+          <span>受限模型明色 / 暗色</span><b>${constrained.brightD65.hex} / ${constrained.dimWarmA.hex}</b>
+          <span class="lab-dry-line">干燥复算（同一剩余质量与 h=${swatch.h}）：光谱 <b>${dryModels.spectral.brightD65.hex}</b> · 受限 <b>${dryModels.constrained.brightD65.hex}</b> · ΔE00=<b>${dryModels.deltaEBright.toFixed(2)}</b></span>
+        </div>
+      </article>`;
+    })
+    .join('');
+
+  $('#lab-model-summary').innerHTML = report.metamer.specimens
+    .map(
+      (s) =>
+        `<div><code>${s.id}</code>：光谱↔受限 ΔE00 明=${s.models.deltaEBright.toFixed(2)} / 暖=${s.models.deltaEWarm.toFixed(2)}，RMSE=${s.models.spectralRmse.toFixed(4)}</div>`
+    )
+    .join('') +
+    `<div>D65 同色 ΔE00=<b>${report.metamer.brightD65DeltaE00.toFixed(2)}</b>；暖光分离 ΔE00=<b>${report.metamer.warmADeltaE00.toFixed(2)}</b>。反复混合最大相对质量漂移=${report.repeatedMix.spectral.maxRelativeDrift.toExponential(2)}。</div>`;
+  renderLabChart();
+}
+
+function labWater() {
+  const removed = labSwatches.map((s) => s.applyWater(LAB_DROP));
+  const totalRemoved = removed.reduce((sum, r) => sum + r.removedMass, 0);
+  const blocked = labSwatches.filter((s) => s.sealed).length;
+  renderLab();
+  labSetStatus(
+    totalRemoved > 0
+      ? `同一滴清水施予两片：共从可溶未封层回取 ${totalRemoved.toFixed(3)} 色料；封存片阻挡 ${blocked} 片。质量已转入水滴/流出物。`
+      : `清水未带走颜料：${blocked ? '封存隔离层阻挡入水，或底层本身耐水。' : '没有可溶底层。'}`,
+    totalRemoved > 0 ? 'bad' : 'ok'
+  );
+  toast(totalRemoved > 0 ? `清水带走 ${totalRemoved.toFixed(2)} 色料；剩余量已更新` : '清水未带走底色', totalRemoved > 0 ? '' : 'ok');
+}
+
+function labSeal() {
+  labSwatches.forEach((s) => s.seal('ui-button'));
+  renderLab();
+  labSetStatus('湿样已封存：透明隔离层不改变反射率，但会阻止下一滴清水到达可溶物质层。', 'ok');
+  toast('湿样已封存；再滴水将不能回取封层下底色', 'ok');
+}
+
+function labDry() {
+  labSwatches.forEach((s) => s.dry());
+  renderLab();
+  labSetStatus('已按晾干政策复算：载体减少，色料质量不变；色样为干燥后反射响应。', 'ok');
+}
+
+function labReset() {
+  labSwatches = createLabSwatches();
+  renderLab();
+  labSetStatus('试混片已重置为两片同 D65 色、异颜料的湿色样。');
+}
+
+function exportLabJSON() {
+  const payload = {
+    app: 'pigment-km-studio',
+    exportedAt: new Date().toISOString(),
+    schema: 'sealable-lab-export-v1',
+    lighting: ['brightD65', 'dimWarmA'],
+    pigmentIds: PIGMENTS.map((p) => p.id),
+    pigmentNames: PIGMENTS.map((p) => p.name),
+    activeSwatches: labSwatches.map((s) => s.snapshot()),
+    recomputedExperiment: buildExperimentReport(),
+  };
+  downloadBlob(
+    new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+    `sealable-pigment-samples-${nowStamp()}.json`
+  );
+  toast('已导出明暗色样、光谱与剩余颜料量 JSON', 'ok', 4200);
+}
+
+function exportLabPNG() {
+  const W = 960;
+  const H = 560;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#f7f8fa';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#1f2430';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText('可封存湿色样：明 D65 / 暗暖光与剩余颜料量', 28, 42);
+  ctx.font = '13px monospace';
+  ctx.fillStyle = '#5b6472';
+  ctx.fillText(`exported ${new Date().toISOString()} · colors are spectral-KM display transforms`, 28, 66);
+
+  labSwatches.forEach((swatch, i) => {
+    const snap = swatch.snapshot();
+    const x = 28 + i * 456;
+    const y = 92;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#dfe3ea';
+    ctx.beginPath();
+    ctx.roundRect(x, y, 430, 420, 14);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#1f2430';
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText(`${i + 1}. ${snap.name}`, x + 18, y + 34);
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#5b6472';
+    ctx.fillText(`${snap.recipeId} · sealed=${snap.sealed} · wet=${snap.wet}`, x + 18, y + 56);
+
+    const colors = [
+      ['明 D65', snap.colors.spectral.brightD65.hex],
+      ['暗暖光', snap.colors.spectral.dimWarmA.hex],
+      ['受限明色', snap.colors.constrained.brightD65.hex],
+      ['受限暗色', snap.colors.constrained.dimWarmA.hex],
+    ];
+    colors.forEach(([label, hex], j) => {
+      const sx = x + 18 + (j % 2) * 202;
+      const sy = y + 82 + Math.floor(j / 2) * 82;
+      ctx.fillStyle = hex;
+      ctx.fillRect(sx, sy, 184, 54);
+      ctx.strokeStyle = 'rgba(0,0,0,.15)';
+      ctx.strokeRect(sx + 0.5, sy + 0.5, 183, 53);
+      ctx.fillStyle = '#1f2430';
+      ctx.font = '12px monospace';
+      ctx.fillText(`${label} ${hex}`, sx, sy + 70);
+    });
+
+    ctx.fillStyle = '#1f2430';
+    ctx.font = '14px monospace';
+    const lines = [
+      `remaining pigment = ${snap.remainingMass.toFixed(4)}`,
+      `effluent pigment  = ${snap.effluentMass.toFixed(4)}`,
+      `total mass        = ${snap.totalPigmentMass.toFixed(4)}`,
+      `soluble=${snap.soluble} sealed=${snap.sealed}`,
+    ];
+    lines.forEach((line, j) => ctx.fillText(line, x + 18, y + 286 + j * 26));
+  });
+
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      toast('PNG 导出失败', 'error');
+      return;
+    }
+    downloadBlob(blob, `sealable-pigment-samples-${nowStamp()}.png`);
+    toast('已导出色样 PNG（剩余颜料量同时写在图面）', 'ok');
+  }, 'image/png');
+}
+
+// ---------- 绘画窗口接点自检 ----------
+function setRuntimeState(text, kind = 'idle') {
+  const dot = $('#health-dot');
+  const el = $('#runtime-state');
+  if (el) {
+    el.className = `runtime-state ${kind}`;
+    el.textContent = text;
+  }
+  if (dot && kind === 'bad') dot.classList.add('bad');
+}
+
+function setIntegrationPanel(state) {
+  const panel = $('#integration-panel');
+  panel.className = `integration-panel ${state.kind}`;
+  $('#integration-title').textContent = state.title;
+  $('#integration-summary').textContent = state.summary;
+  const root = $('#integration-anomalies');
+  root.innerHTML = (state.anomalies || [])
+    .map((a) => `<div class="anomaly-item">px ${a.idx} (${a.x},${a.y}) ${a.kind}: ${a.detail}</div>`)
+    .join('');
+  const layer = $('#anomaly-layer');
+  layer.innerHTML = '';
+  for (const a of state.anomalies || []) {
+    const marker = document.createElement('div');
+    marker.className = 'anomaly-marker';
+    marker.style.left = `${(a.x / doc.W) * 100}%`;
+    marker.style.top = `${(a.y / doc.H) * 100}%`;
+    marker.style.width = `${Math.max(1.8, (a.r || 5) / doc.W * 100 * 2)}%`;
+    marker.style.height = `${Math.max(2.4, (a.r || 5) / doc.H * 100 * 2)}%`;
+    layer.appendChild(marker);
+  }
+  for (const p of state.probes || []) {
+    const marker = document.createElement('div');
+    marker.className = 'probe-marker';
+    marker.style.left = `${(p.x / doc.W) * 100}%`;
+    marker.style.top = `${(p.y / doc.H) * 100}%`;
+    marker.title = p.label;
+    layer.appendChild(marker);
+  }
+}
+
+function runIntegrationCheck() {
+  setRuntimeState('接点自检运行中…', 'running');
+  setIntegrationPanel({ kind: 'running', title: '正在混合颜料并叠画色块', summary: '创建可撤销的自检场景…' });
+  try {
+    const backup = doc.clear();
+    pushHistory({ type: 'clear', backup });
+
+    const mixBrush = new Brush();
+    mixBrush.radius = 13;
+    mixBrush.exchange = 0.15;
+    const yellowIdx = PIGMENTS.findIndex((p) => p.id === 'py-lemon');
+    const cyanIdx = PIGMENTS.findIndex((p) => p.id === 'pb15-cyan');
+    const mixParts = new Array(P).fill(0);
+    mixParts[yellowIdx] = 1;
+    mixParts[cyanIdx] = 1;
+    mixBrush.loadMix(mixParts, { dabs: 90, vehicleRatio: 1.5 });
+
+    for (let x = 24; x <= 150; x += 5) {
+      for (const y of [78, 92, 106, 120]) doc.applyDab(x, y, mixBrush, new Map());
+    }
+    attachBuffer();
+    paintAll();
+
+    const mixProbe = { x: 86, y: 99, idx: 99 * DOC_W + 86, label: '黄青均质混合' };
+    const mixedBeforeGlaze = evaluatePixelColor(doc, mixProbe.idx);
+    doc.dryWet('接点自检混合层');
+    paintAll();
+    const mixedDry = evaluatePixelColor(doc, mixProbe.idx);
+
+    const glazeBrush = new Brush();
+    glazeBrush.radius = 16;
+    glazeBrush.flow = 0.42;
+    const magentaParts = new Array(P).fill(0);
+    magentaParts[PIGMENTS.findIndex((p) => p.id === 'pv19-magenta')] = 1;
+    glazeBrush.loadMix(magentaParts, { dabs: 80, vehicleRatio: 3.2 });
+    for (let x = 70; x <= 210; x += 5) {
+      for (const y of [92, 106, 120]) doc.applyDab(x, y, glazeBrush, new Map());
+    }
+    paintAll();
+
+    const probes = [
+      mixProbe,
+      { x: 176, y: 106, idx: 106 * DOC_W + 176, label: '品红叠涂区' },
+      { x: 42, y: 99, idx: 99 * DOC_W + 42, label: '混合色块左区' },
+    ];
+    const view = $('#view');
+    const actual = view.getContext('2d').getImageData(0, 0, doc.W, doc.H).data;
+    const anomalies = [];
+    let maxChannelDiff = 0;
+    for (const p of probes) {
+      const expected = evaluatePixelColor(doc, p.idx);
+      const q = p.idx * 4;
+      const actualRgb = { r: actual[q], g: actual[q + 1], b: actual[q + 2] };
+      const d = Math.max(
+        Math.abs(actualRgb.r - expected.r),
+        Math.abs(actualRgb.g - expected.g),
+        Math.abs(actualRgb.b - expected.b)
+      );
+      maxChannelDiff = Math.max(maxChannelDiff, d);
+      if (d > 1) {
+        anomalies.push({
+          idx: p.idx,
+          x: p.x,
+          y: p.y,
+          r: 8,
+          kind: '画布像素不一致',
+          detail: `actual rgb(${actualRgb.r},${actualRgb.g},${actualRgb.b}) expected ${expected.hex} maxΔ=${d}`,
+        });
+      }
+    }
+
+    const overlappedAfter = evaluatePixelColor(doc, mixProbe.idx);
+    const colorChangeDE = deltaE2000(mixedDry.lab, overlappedAfter.lab);
+    if (!(colorChangeDE > 2)) {
+      anomalies.push({
+        idx: mixProbe.idx,
+        x: mixProbe.x,
+        y: mixProbe.y,
+        r: 10,
+        kind: '颜色变化异常',
+        detail: `叠罩后 ΔE00=${colorChangeDE.toFixed(2)}，预期 >2`,
+      });
+    }
+
+    const dryChangeDE = deltaE2000(mixedBeforeGlaze.lab, mixedDry.lab);
+    const mass = doc.totalPigmentMass() + mixBrush.totalMass() + glazeBrush.totalMass();
+    lastIntegration = {
+      at: new Date().toISOString(),
+      maxChannelDiff,
+      colorChangeDE,
+      dryChangeDE,
+      mass,
+      anomalies,
+      actualPixel: probes.map((p) => {
+        const q = p.idx * 4;
+        return { ...p, rgb: [actual[q], actual[q + 1], actual[q + 2]] };
+      }),
+    };
+    window.__pigmentLastIntegration = lastIntegration;
+
+    const pass = anomalies.length === 0;
+    setIntegrationPanel({
+      kind: pass ? 'ok' : 'bad',
+      title: pass ? '绘画接点通过：混色、叠画与画布像素一致' : `发现 ${anomalies.length} 项接点异常`,
+      summary: `像素最大通道差 ${maxChannelDiff} · 叠画颜色 ΔE00=${colorChangeDE.toFixed(2)} · 湿干变化 ΔE00=${dryChangeDE.toFixed(2)} · 可见绿点为核对位置`,
+      anomalies,
+      probes,
+    });
+    setRuntimeState(pass ? `运行正常 · 接点已核对 ΔE ${colorChangeDE.toFixed(1)}` : '颜色/像素接点异常', pass ? 'ok' : 'bad');
+    toast(pass ? '绘画窗口接点自检通过；可 Ctrl/⌘+Z 恢复自检前画布' : '接点自检发现异常，请看红框与列表明细', pass ? 'ok' : 'error', 5200);
+  } catch (err) {
+    health.report('integration', err.message, err.stack);
+    setIntegrationPanel({ kind: 'bad', title: '绘画接点自检执行失败', summary: err.message, anomalies: [{ idx: 0, x: 10, y: 10, kind: 'exception', detail: err.message }] });
+    setRuntimeState('运行异常 · 接点自检失败', 'bad');
+    toast(`接点自检失败：${err.message}`, 'error', 6000);
+  }
+}
+
 // ---------- 保存 / 读取 / 导出 ----------
 async function saveState() {
   try {
@@ -822,6 +1210,13 @@ function bindUI() {
     })
   );
   $('#btn-run-checks').addEventListener('click', renderChecks);
+  $('#btn-integration-check').addEventListener('click', runIntegrationCheck);
+  $('#btn-lab-water').addEventListener('click', labWater);
+  $('#btn-lab-seal').addEventListener('click', labSeal);
+  $('#btn-lab-dry').addEventListener('click', labDry);
+  $('#btn-lab-reset').addEventListener('click', labReset);
+  $('#btn-lab-export-json').addEventListener('click', exportLabJSON);
+  $('#btn-lab-export-png').addEventListener('click', exportLabPNG);
 
   $('#btn-help').addEventListener('click', () => ($('#help-modal').hidden = false));
   $('#btn-help-close').addEventListener('click', () => ($('#help-modal').hidden = true));
@@ -861,6 +1256,9 @@ function fillHelp() {
       <li>未干区域上的新笔会发生<strong>颜料交换</strong>（回取湿色、改变笔的组成）；点顶栏
         <strong>“晾干成层”</strong>后，新笔触不再交换干色，而是作为上层用 KM 光学叠加，薄层会透出底色。</li>
       <li>右栏可取样 A/B 比较色差与色料组成、查看三种规定测试和像素放大。</li>
+      <li>顶栏画布工具组里的 <strong>“绘画接点自检”</strong> 会真实混色、晾干、叠画色块，再逐像素对照绘画窗口；异常会在画布上用红框标出，绿色小点是核对位置。</li>
+      <li>右栏 <strong>“封存试混”</strong> 是可封存湿色样图形入口：可滴同一滴清水、先封存再滴水、干燥复算，并导出明亮 D65/昏暗暖光色样与剩余颜料量 JSON/PNG。</li>
+      <li>命令行 <code>npm run experiments</code> 只用于复算实验数据和文档证据；日常绘画仍以 <code>npm start</code> 的图形窗口为主入口。</li>
       <li>“保存色料状态”导出的是每层色料质量数组（gzip JSON，<code>.pigm</code>），不是截图；
         “导出图像”才输出 PNG。</li>
     </ul>
@@ -887,11 +1285,19 @@ function init() {
   refreshBrushUI();
   fillPigmentSelects();
   renderBench();
+  renderLab();
   renderChecks();
   fillHelp();
   bindUI();
   bindCanvasPointer();
   applyZoom();
+
+  window.__pigmentStudio = {
+    runIntegrationCheck,
+    getLabSwatches: () => labSwatches,
+    buildExperimentReport,
+    getDoc: () => doc,
+  };
 
   health.subscribe((issue) => {
     $('#health-dot').classList.add('bad');

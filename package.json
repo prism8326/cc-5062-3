@@ -6,7 +6,9 @@
   "description": "颜料混色绘画原型：显式色料质量 + 简化 Kubelka-Munk 光学模型",
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "experiments": "node tools/run-pigment-model-experiments.mjs",
     "preview": "node tools/render-preview.mjs",
+    "smoke": "node tools/browser-smoke.mjs",
     "start": "node tools/serve.mjs"
   },
   "devDependencies": {
